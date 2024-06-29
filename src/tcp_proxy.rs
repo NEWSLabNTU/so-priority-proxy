@@ -13,15 +13,15 @@ pub async fn tcp_proxy(
     let (tx, rx) = flume::bounded(4);
     let listener = TcpListener::bind(bind_addr)
         .await
-        .with_context(|| format!("unable to listen to address {bind_addr}"))?;
+        .with_context(|| format!("unable to bind address {bind_addr}"))?;
 
     let accepter = async {
         loop {
             let (src_stream, src_addr) = listener
                 .accept()
                 .await
-                .with_context(|| format!("accept() failed on listening address '{bind_addr}'"))?;
-            info!("accepted a connection from '{src_addr}', forwarding to '{dst_addr}'");
+                .with_context(|| format!("accept() failed on address '{bind_addr}'"))?;
+            info!("accepted a connection from {src_addr}");
 
             let forwarder = run_forwarding(src_addr, dst_addr, src_stream, priority);
             let Ok(()) = tx.send_async(forwarder).await else {
@@ -86,10 +86,11 @@ async fn run_forwarding(
 
     let mut dst_stream = TcpStream::connect(dst_addr)
         .await
-        .with_context(|| format!("unable to connect to '{dst_addr}'"))?;
+        .with_context(|| format!("unable to connect to {dst_addr}"))?;
+    info!("established a TCP proxy {src_addr} <-> {dst_addr}");
 
     setsockopt(&dst_stream.as_fd(), Priority, &priority)
-        .with_context(|| format!("setsockopt() failed on socket connecting to '{dst_addr}'"))?;
+        .with_context(|| format!("setsockopt() failed on socket connecting to {dst_addr}"))?;
 
     let (mut src_rd, mut src_wr) = src_stream.split();
     let (mut dst_rd, mut dst_wr) = dst_stream.split();
@@ -99,7 +100,7 @@ async fn run_forwarding(
             result.with_context(|| format!("I/O error when forwarding {src_addr} to {dst_addr}"))?;
         }
         result = tokio::io::copy(&mut dst_rd, &mut src_wr) => {
-            result.with_context(|| format!("I/O error when forwarding {src_addr} to {dst_addr}"))?;
+            result.with_context(|| format!("I/O error when forwarding {dst_addr} to {src_addr}"))?;
         }
     }
 

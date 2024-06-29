@@ -2,6 +2,7 @@ use anyhow::Context;
 use nix::sys::socket::{setsockopt, sockopt::Priority};
 use std::{net::SocketAddr, os::fd::AsFd};
 use tokio::net::UdpSocket;
+use tracing::info;
 
 const BUF_SIZE: usize = 65535;
 
@@ -18,31 +19,53 @@ pub async fn udp_proxy(
 
     let mut buf = [0; BUF_SIZE];
 
+    let send = |addr: SocketAddr, sz: usize| {
+        let socket = &socket;
+        async move {
+            socket
+                .send_to(&buf[0..sz], addr)
+                .await
+                .with_context(|| format!("failed to send to {addr}"))
+        }
+    };
+    let recv = || {
+        let socket = &socket;
+        async move {
+            let (sz, addr) = socket
+                .recv_from(&mut buf)
+                .await
+                .with_context(|| format!("failed to receive data on {bind_addr}"))?;
+
+            anyhow::Ok((sz, addr))
+        }
+    };
+
+    // Wait for the first connection
     let src_addr = loop {
-        let (sz, from_addr) = socket.recv_from(&mut buf).await?;
+        let (sz, from_addr) = recv().await?;
 
         if sz == 0 {
             return Ok(());
         }
 
         if from_addr != dst_addr {
-            socket.send_to(&buf[0..sz], dst_addr).await?;
+            send(dst_addr, sz).await?;
             break from_addr;
         }
     };
+    info!("established a UDP proxy {src_addr} <-> {dst_addr}");
 
+    // Start forwarding
     loop {
-        let (sz, from_addr) = socket.recv_from(&mut buf).await?;
+        let (sz, from_addr) = recv().await?;
         if sz == 0 {
             break;
         }
 
-        let buf = &buf[0..sz];
-
         if from_addr == dst_addr {
-            socket.send_to(buf, src_addr).await?;
+            send(src_addr, sz).await?;
         } else if from_addr == src_addr {
-            socket.send_to(buf, dst_addr).await?;
+            send(dst_addr, sz).await?;
         }
     }
 
