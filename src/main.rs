@@ -1,12 +1,14 @@
 mod config;
-mod proxy;
+mod tcp_proxy;
+mod udp_proxy;
 
 use clap::Parser;
 use config::{Config, Map, Protocol};
 use futures::{stream::FuturesUnordered, TryStreamExt};
-use proxy::tcp_proxy;
 use std::{path::PathBuf, time::Duration};
+use tcp_proxy::tcp_proxy;
 use tracing::error;
+use udp_proxy::udp_proxy;
 
 #[derive(Parser)]
 struct Args {
@@ -26,24 +28,34 @@ async fn main() -> anyhow::Result<()> {
         .map(|map| {
             let Map {
                 protocol,
-                src,
-                dst,
+                src: bind_addr,
+                dst: dst_addr,
                 priority,
             } = map;
 
             match protocol {
                 Protocol::Tcp => tokio::spawn(async move {
                     loop {
-                        match tcp_proxy(src, dst, priority).await {
+                        match tcp_proxy(bind_addr, dst_addr, priority).await {
                             Ok(()) => break,
                             Err(err) => {
-                                error!("proxy {src} -> {dst} failed: {err}\nretry in 3 seconds");
+                                error!("proxy {bind_addr} -> {dst_addr} failed: {err}\nretry in 3 seconds");
                                 tokio::time::sleep(Duration::from_secs(3)).await;
                             }
                         }
                     }
                 }),
-                Protocol::Udp => todo!(),
+                Protocol::Udp => tokio::spawn(async move {
+                    loop {
+                        match udp_proxy(bind_addr, dst_addr, priority).await {
+                            Ok(()) => break,
+                            Err(err) => {
+                                error!("proxy {bind_addr} -> {dst_addr} failed: {err}\nretry in 3 seconds");
+                                tokio::time::sleep(Duration::from_secs(3)).await;
+                            }
+                        }
+                    }
+                }),
             }
         })
         .collect();
