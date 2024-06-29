@@ -11,7 +11,7 @@ yet, download it from [rustup.rs](https://rustup.rs/).
 To install this program,
 
 ```bash
-cargo install --git https://github.com/jerry73204/so-priority-proxy.git
+cargo install --git https://github.com/NEWSLabNTU/so-priority-proxy.git
 ```
 
 ## Usage
